@@ -2,7 +2,6 @@
 #include "field-math.hpp"
 #include "optimizer.hpp"
 #include "parametrizer.hpp"
-#include "subdivide-refine.hpp"
 #include <stdlib.h>
 
 #ifdef WITH_CUDA
@@ -22,7 +21,6 @@ int main(int argc, char** argv) {
     int t1, t2;
     std::string input_obj, output_obj;
     int faces = -1;
-    int subdivisions = 2;
     for (int i = 0; i < argc; ++i) {
         if (strcmp(argv[i], "-f") == 0) {
             sscanf(argv[i + 1], "%d", &faces);
@@ -42,8 +40,6 @@ int main(int argc, char** argv) {
             field.flag_aggresive_sat = 1;
         } else if (strcmp(argv[i], "-seed") == 0) {
             field.hierarchy.rng_seed = atoi(argv[i + 1]);
-        } else if (strcmp(argv[i], "-subdiv") == 0) {
-            sscanf(argv[i + 1], "%d", &subdivisions);
         }
     }
     printf("%d %s %s\n", faces, input_obj.c_str(), output_obj.c_str());
@@ -96,7 +92,7 @@ int main(int argc, char** argv) {
     printf("Use %lf seconds\n", (t2 - t1) * 1e-3);
 
     if (field.flag_adaptive_scale == 1) {
-        printf("Estimate slope...\n");
+        printf("Estimate Slop...\n");
         t1 = GetCurrentTime64();
         field.EstimateSlope();
         t2 = GetCurrentTime64();
@@ -123,13 +119,6 @@ int main(int argc, char** argv) {
     t2 = GetCurrentTime64();
     printf("Indexmap Use %lf seconds\n", (t2 - t1) * 1e-3);
     print_progress(99);
-    if (subdivisions > 0) {
-        printf("Subdivide and refit (%d level%s)...\n",
-               subdivisions, subdivisions == 1 ? "" : "s");
-        SubdivideAndRefit(field.O_compact, field.F_compact,
-                          field.hierarchy.mV[0], field.hierarchy.mF,
-                          subdivisions);
-    }
     printf("Writing the file...\n");
 
     if (output_obj.size() < 1) {

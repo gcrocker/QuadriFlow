@@ -1,17 +1,12 @@
 #include "optimizer.hpp"
 
 #include <Eigen/Sparse>
-#include <Eigen/IterativeLinearSolvers>
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <queue>
 #include <unordered_map>
-#include <unordered_set>
-#ifdef WITH_OMP
-#include <omp.h>
-#endif
 
 #include "config.hpp"
 #include "field-math.hpp"
@@ -162,10 +157,7 @@ void Optimizer::optimize_scale(Hierarchy& mRes, VectorXd& rho, int adaptive) {
     if (adaptive) {
         std::vector<Eigen::Triplet<double>> lhsTriplets;
 
-        lhsTriplets.reserve(F.cols() * 24);
-#ifdef WITH_OMP
-#pragma omp parallel for
-#endif
+        lhsTriplets.reserve(F.cols() * 6);
         for (int i = 0; i < V.cols(); ++i) {
             for (int j = 0; j < 2; ++j) {
                 S(j, i) = 1.0;
@@ -174,72 +166,65 @@ void Optimizer::optimize_scale(Hierarchy& mRes, VectorXd& rho, int adaptive) {
             }
         }
 
+        std::vector<std::map<int, double>> entries(V.cols() * 2);
         double lambda = 1;
-        // Build triplets directly — setFromTriplets sums duplicates, so
-        // the face loop is embarrassingly parallel with thread-local storage.
-#ifdef WITH_OMP
-        int nthreads = omp_get_max_threads();
-#else
-        int nthreads = 1;
-#endif
-        std::vector<std::vector<Eigen::Triplet<double>>> tlocal(nthreads);
-        // Diagonal (lambda * I)
-#ifdef WITH_OMP
-#pragma omp parallel for
-#endif
-        for (int i = 0; i < V.cols() * 2; ++i) {
-#ifdef WITH_OMP
-            tlocal[omp_get_thread_num()].push_back({i, i, lambda});
-#else
-            tlocal[0].push_back({i, i, lambda});
-#endif
+        for (int i = 0; i < entries.size(); ++i) {
+            entries[i][i] = lambda;
         }
-        // Per-face off-diagonal entries
-#ifdef WITH_OMP
-#pragma omp parallel for schedule(static)
-#endif
         for (int i = 0; i < F.cols(); ++i) {
-#ifdef WITH_OMP
-            auto& lt = tlocal[omp_get_thread_num()];
-#else
-            auto& lt = tlocal[0];
-#endif
             for (int j = 0; j < 3; ++j) {
                 int v1 = F(j, i);
                 int v2 = F((j + 1) % 3, i);
                 Vector3d diff = V.col(v2) - V.col(v1);
                 Vector3d q_1 = Q.col(v1);
+                Vector3d q_2 = Q.col(v2);
                 Vector3d n_1 = N.col(v1);
                 Vector3d n_2 = N.col(v2);
                 Vector3d q_1_y = n_1.cross(q_1);
-                auto index = compat_orientation_extrinsic_index_4(q_1, n_1, Q.col(v2), n_2);
+                auto index = compat_orientation_extrinsic_index_4(q_1, n_1, q_2, n_2);
                 int v1_x = v1 * 2, v1_y = v1 * 2 + 1, v2_x = v2 * 2, v2_y = v2 * 2 + 1;
+
                 double dx = diff.dot(q_1);
                 double dy = diff.dot(q_1_y);
-                if (index.first % 2 != index.second % 2) std::swap(v2_x, v2_y);
-                double scale_x = fmin(fmax(1 + K(0, v1) * dy, 0.3), 3);
-                double scale_y = fmin(fmax(1 + K(1, v1) * dx, 0.3), 3);
-                lt.push_back({v2_x, v2_x, 1.0});
-                lt.push_back({v1_x, v1_x, scale_x * scale_x});
-                lt.push_back({v2_y, v2_y, 1.0});
-                lt.push_back({v1_y, v1_y, scale_y * scale_y});
-                lt.push_back({v1_x, v2_x, -scale_x});
-                lt.push_back({v2_x, v1_x, -scale_x});
-                lt.push_back({v1_y, v2_y, -scale_y});
-                lt.push_back({v2_y, v1_y, -scale_y});
+
+                double kx_g = K(0, v1);
+                double ky_g = K(1, v1);
+
+                if (index.first % 2 != index.second % 2) {
+                    std::swap(v2_x, v2_y);
+                }
+                double scale_x = (fmin(fmax(1 + kx_g * dy, 0.3), 3));
+                double scale_y = (fmin(fmax(1 + ky_g * dx, 0.3), 3));
+                //                (v2_x - scale_x * v1_x)^2 = 0
+                // x^2 - 2s xy + s^2 y^2
+                entries[v2_x][v2_x] += 1;
+                entries[v1_x][v1_x] += scale_x * scale_x;
+                entries[v2_y][v2_y] += 1;
+                entries[v1_y][v1_y] += scale_y * scale_y;
+                auto it = entries[v1_x].find(v2_x);
+                if (it == entries[v1_x].end()) {
+                    entries[v1_x][v2_x] = -scale_x;
+                    entries[v2_x][v1_x] = -scale_x;
+                    entries[v1_y][v2_y] = -scale_y;
+                    entries[v2_y][v1_y] = -scale_y;
+                } else {
+                    it->second -= scale_x;
+                    entries[v2_x][v1_x] -= scale_x;
+                    entries[v1_y][v2_y] -= scale_y;
+                    entries[v2_y][v1_y] -= scale_y;
+                }
             }
         }
-        // Merge thread-local triplets
-        for (int t = 0; t < nthreads; ++t)
-            lhsTriplets.insert(lhsTriplets.end(), tlocal[t].begin(), tlocal[t].end());
 
         Eigen::SparseMatrix<double> A(V.cols() * 2, V.cols() * 2);
         VectorXd rhs(V.cols() * 2);
-#ifdef WITH_OMP
-#pragma omp parallel for
-#endif
-        for (int i = 0; i < V.cols() * 2; ++i)
+        rhs.setZero();
+        for (int i = 0; i < entries.size(); ++i) {
             rhs(i) = lambda * S(i % 2, i / 2);
+            for (auto& rec : entries[i]) {
+                lhsTriplets.push_back(Eigen::Triplet<double>(i, rec.first, rec.second));
+            }
+        }
         A.setFromTriplets(lhsTriplets.begin(), lhsTriplets.end());
         LinearSolver<Eigen::SparseMatrix<double>> solver;
         solver.analyzePattern(A);
@@ -266,13 +251,10 @@ void Optimizer::optimize_scale(Hierarchy& mRes, VectorXd& rho, int adaptive) {
         }
     }
 
-    for (int l = 0; l < (int)mRes.mS.size() - 1; ++l) {
+    for (int l = 0; l < mRes.mS.size() - 1; ++l) {
         const MatrixXd& S = mRes.mS[l];
         MatrixXd& S_next = mRes.mS[l + 1];
         auto& toUpper = mRes.mToUpper[l];
-#ifdef WITH_OMP
-#pragma omp parallel for
-#endif
         for (int i = 0; i < toUpper.cols(); ++i) {
             Vector2i upper = toUpper.col(i);
             Vector2d q0 = S.col(upper[0]);
@@ -424,10 +406,7 @@ void Optimizer::optimize_positions_dynamic(
         }
     }
     auto FindNearest = [&]() {
-#ifdef WITH_OMP
-#pragma omp parallel for
-#endif
-        for (int i = 0; i < (int)O_compact.size(); ++i) {
+        for (int i = 0; i < O_compact.size(); ++i) {
             if (Vind[i] == -1) {
                 double min_dis = 1e30;
                 int min_ind = -1;
@@ -703,29 +682,28 @@ void Optimizer::optimize_positions_dynamic(
         int t1 = GetCurrentTime64();
 #endif
 
-        // Use ConjugateGradient with diagonal preconditioner (the default).
-        // DiagonalPreconditioner is safe; IncompleteCholesky was tried by the
-        // original authors but crashed — see the FIXME in git history.
-        // Warm-start from the current positions to reduce iteration count.
-        Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
-                                  Eigen::Lower|Eigen::Upper> solver;
-        solver.setMaxIterations(300);
-        solver.setTolerance(1e-4);
-        solver.compute(A);
-        VectorXd x0 = VectorXd::Map(x.data(), x.size());
-        VectorXd x_new = solver.solveWithGuess(rhs, x0);
+        // FIXME: IncompleteCholesky Preconditioner will fail here so I fallback to Diagonal one.
+        // I suspected either there is a implementation bug in IncompleteCholesky Preconditioner
+        // or there is a memory corruption somewhere.  However, g++'s address sanitizer does not
+        // report anything useful.
+        LinearSolver<Eigen::SparseMatrix<double>> solver;
+        solver.analyzePattern(A);
+        solver.factorize(A);
+        //        Eigen::setNbThreads(1);
+        //        ConjugateGradient<SparseMatrix<double>, Lower | Upper> solver;
+        //        VectorXd x0 = VectorXd::Map(x.data(), x.size());
+        //        solver.setMaxIterations(40);
+
+        //        solver.compute(A);
+        VectorXd x_new = solver.solve(rhs);  // solver.solveWithGuess(rhs, x0);
 
 #ifdef LOG_OUTPUT
-        printf("[CG dyn iter %d/%d] n=%d  cg_iters=%d  err=%g\n",
-               iter + 1, max_iter, (int)O_compact.size(),
-               (int)solver.iterations(), solver.error());
+        // std::cout << "[LSQ] n_iteration:" << solver.iterations() << std::endl;
+        // std::cout << "[LSQ] estimated error:" << solver.error() << std::endl;
         int t2 = GetCurrentTime64();
         printf("[LSQ] Linear solver uses %lf seconds.\n", (t2 - t1) * 1e-3);
 #endif
-#ifdef WITH_OMP
-#pragma omp parallel for
-#endif
-        for (int i = 0; i < (int)O_compact.size(); ++i) {
+        for (int i = 0; i < O_compact.size(); ++i) {
             // Vector3d q = Q.col(Vind[i]);
             Vector3d q = Q_compact[i];
             // Vector3d n = N.col(Vind[i]);
@@ -1197,13 +1175,19 @@ void Optimizer::optimize_positions_fixed(
 #ifdef LOG_OUTPUT
     int t1 = GetCurrentTime64();
 #endif
-    Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
-                              Eigen::Lower|Eigen::Upper> solver;
-    solver.setMaxIterations(300);
-    solver.setTolerance(1e-5);
-    VectorXd x0 = VectorXd::Map(x.data(), x.size());
-    solver.compute(A);
-    VectorXd x_new = solver.solveWithGuess(rhs, x0);
+    /*
+        Eigen::setNbThreads(1);
+        ConjugateGradient<SparseMatrix<double>, Lower | Upper> solver;
+        VectorXd x0 = VectorXd::Map(x.data(), x.size());
+        solver.setMaxIterations(40);
+
+        solver.compute(A);
+     */
+    LinearSolver<Eigen::SparseMatrix<double>> solver;
+    solver.analyzePattern(A);
+    solver.factorize(A);
+
+    VectorXd x_new = solver.solve(rhs);
 #ifdef LOG_OUTPUT
     // std::cout << "[LSQ] n_iteration:" << solver.iterations() << std::endl;
     // std::cout << "[LSQ] estimated error:" << solver.error() << std::endl;

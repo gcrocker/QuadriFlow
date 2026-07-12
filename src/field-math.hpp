@@ -388,7 +388,7 @@ inline Vector3d TravelField(Vector3d p, Vector3d &pt, double &len, int &f, Vecto
         }
     };
 
-    while (len > 0 && count < 100) {
+    while (len > 0) {
         count += 1;
         Vector3d t1 = V.col(F(1, f)) - V.col(F(0, f));
         Vector3d t2 = V.col(F(2, f)) - V.col(F(0, f));
@@ -433,12 +433,9 @@ inline Vector3d TravelField(Vector3d p, Vector3d &pt, double &len, int &f, Vecto
             w2 /= w;
         }
 
-        // Numerical precision guard: if the step is negligibly small the
-        // ray is grazing an edge; treat current position as the endpoint.
-        if (max_len < 1e-10) break;
-
         if (!found) {
-            break;  // boundary with no neighbour; stop gracefully
+            printf("error...\n");
+            exit(0);
         }
         //		printf("status: %f %f %d\n", len, max_len, f);
         if (max_len >= len) {
