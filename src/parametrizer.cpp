@@ -74,8 +74,10 @@ void Parametrizer::ComputeIndexMap(int with_scale) {
     printf("Build Integer Constraints...\n");
 #endif
     BuildIntegerConstraints();
+    print_progress(92);
 
     ComputeMaxFlow();
+    print_progress(93);
     // potential bug
 #ifdef LOG_OUTPUT
     printf("subdivide...\n");
@@ -103,6 +105,7 @@ void Parametrizer::ComputeIndexMap(int with_scale) {
                        edge_diff, edge_values, face_edgeOrients, face_edgeIds, sharp_edges,
                        singularities, 1);
     FixFlipSat();
+    print_progress(94);
 
 #ifdef LOG_OUTPUT
     int t2 = GetCurrentTime64();
@@ -122,10 +125,12 @@ void Parametrizer::ComputeIndexMap(int with_scale) {
 
     Optimizer::optimize_positions_fixed(hierarchy, edge_values, edge_diff, sharp_vertices,
                                         sharp_constraints, flag_adaptive_scale);
+    print_progress(95);
 
     AdvancedExtractQuad();
 
     FixValence();
+    print_progress(96);
 
     std::vector<int> sharp_o(O_compact.size(), 0);
     std::map<int, std::pair<Vector3d, Vector3d>> compact_sharp_constraints;
@@ -233,6 +238,7 @@ void Parametrizer::ComputeIndexMap(int with_scale) {
         }
     }
 
+    print_progress(97);
     Optimizer::optimize_positions_dynamic(F, V, N, Q, Vset, O_compact, F_compact, V2E_compact,
                                           E2E_compact, sqrt(surface_area / F_compact.size()),
                                           diffs, diff_count, o2e, sharp_o,

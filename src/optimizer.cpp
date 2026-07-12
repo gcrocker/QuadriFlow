@@ -568,6 +568,7 @@ void Optimizer::optimize_positions_dynamic(
     BuildConnection();
     int max_iter = 10;
     for (int iter = 0; iter < max_iter; ++iter) {
+        print_progress(97 + (iter + 1) * 2 / max_iter);  // steps at iter 5 (98%) and 10 (99%)
         FindNearest();
         ComputeDistance();
 
