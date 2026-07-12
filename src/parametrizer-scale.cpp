@@ -10,7 +10,7 @@ void Parametrizer::ComputeInverseAffine()
 #ifdef WITH_OMP
 #pragma omp parallel for
 #endif
-    for (int i = 0; i < F.cols(); ++i) {
+    for (int i = 0; i < (int)F.cols(); ++i) {
         Matrix3d p, q;
         p.col(0) = V.col(F(1, i)) - V.col(F(0, i));
         p.col(1) = V.col(F(2, i)) - V.col(F(0, i));
@@ -32,7 +32,11 @@ void Parametrizer::EstimateSlope() {
     auto& mV = hierarchy.mV[0];
     FS.resize(2, mF.cols());
     FQ.resize(3, mF.cols());
-    for (int i = 0; i < mF.cols(); ++i) {
+    int nF = mF.cols();
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
+    for (int i = 0; i < nF; ++i) {
         const Vector3d& n = Nf.col(i);
         const Vector3d &q_1 = mQ.col(mF(0, i)), &q_2 = mQ.col(mF(1, i)), &q_3 = mQ.col(mF(2, i));
         const Vector3d &n_1 = mN.col(mF(0, i)), &n_2 = mN.col(mF(1, i)), &n_3 = mN.col(mF(2, i));
@@ -47,7 +51,10 @@ void Parametrizer::EstimateSlope() {
         q = q - n * q.dot(n);
         FQ.col(i) = q.normalized();
     }
-    for (int i = 0; i < mF.cols(); ++i) {
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
+    for (int i = 0; i < nF; ++i) {
         double step = hierarchy.mScale * 1.f;
         
         const Vector3d &n = Nf.col(i);

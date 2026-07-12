@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     printf("Use %lf seconds\n", (t2 - t1) * 1e-3);
 
     if (field.flag_adaptive_scale == 1) {
-        printf("Estimate Slop...\n");
+        printf("Estimate slope...\n");
         t1 = GetCurrentTime64();
         field.EstimateSlope();
         t2 = GetCurrentTime64();
