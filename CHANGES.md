@@ -146,6 +146,92 @@ quadriflow -i mesh.obj -o out.obj -f 25000 -subdiv 0
 
 ---
 
+## Linear solver: ConjugateGradient
+
+Replaced `Eigen::SimplicialLLT` (serial Cholesky factorization, O(n^1.5)) with
+`Eigen::ConjugateGradient` in `optimize_positions_dynamic` and
+`optimize_positions_fixed`.
+
+Key properties:
+- **No factorization** — CG is iterative, avoiding the O(n^1.5) setup cost.
+- **Warm-start** — each outer iteration initializes CG from the previous
+  solution (vertex positions in local frame), reducing iteration counts in
+  later passes.
+- **DiagonalPreconditioner** (Eigen default) — safe on these mesh Laplacian
+  systems; the IncompleteCholesky preconditioner was tried by the original
+  authors but crashed.
+
+Observed CG convergence (BruceLee, `-f 25000`):
+
+| Outer iter | CG iters | Error |
+|---|---|---|
+| 1 | 64 | 9.5e-5 |
+| 5 | 71 | 9.4e-5 |
+| 10 | 57 | 9.5e-5 |
+
+All well within the 300-iteration cap at 1e-4 tolerance. At small face counts
+(25k) the matrices are compact enough that Cholesky and CG take similar wall
+time. The benefit grows at very large face counts (100k+) where Cholesky
+factorization dominates.
+
+CG iteration counts are printed when built with `-DBUILD_LOG=ON`.
+
+---
+
+## Profiling: index map bottleneck analysis
+
+Per-step timing is available in `ComputeIndexMap` and
+`optimize_integer_constraints` when built with `-DBUILD_LOG=ON`
+(`cmake ... -DBUILD_LOG=ON`). The profiling macros compile to no-ops in
+normal Release builds.
+
+### Findings (BruceLee_Decimated90.obj, 218 MB)
+
+**25k faces** (index map = 31 s total):
+
+| Sub-step | Time | Share |
+|---|---|---|
+| ComputeMaxFlow (Boykov-Kolmogorov) | 24.3 s | **78%** |
+| optimize_positions_dynamic (CG ×10) | 1.8 s | 6% |
+| FixFlipHierarchy | 1.0 s | 3% |
+| AdvancedExtractQuad | 1.0 s | 3% |
+| BuildIntegerConstraints | 1.0 s | 3% |
+
+**200k faces** (index map = 222 s total):
+
+| Sub-step | Time | Share |
+|---|---|---|
+| ComputeMaxFlow | 154 s | 69% |
+| optimize_positions_dynamic (CG ×10) | 23 s | 10% |
+| AdvancedExtractQuad | 7.0 s | 3% |
+| FixFlipHierarchy | 7.5 s | 3% |
+
+### Root cause
+
+The Boykov-Kolmogorov max flow algorithm scales super-linearly with problem
+size: 24 s at 25k grows to 154 s at 200k (≈ O(n^1.1) empirically, but with
+a large constant). It is inherently serial and has no parallel implementation.
+
+### Hierarchical max flow — attempted, not merged
+
+A hierarchical approach (`level=-1` in `DownsampleEdgeGraph`) was tested:
+supply at the finest level dropped from 840 to 2 at 25k, cutting flow time
+from 24 s to 4 s. At 100k the coarse-level flow pushes some edge diff values
+beyond |diff|=1 — a constraint that `subdivide_edgeDiff` enforces strictly.
+All three corrective strategies tried (clamped propagation, clamped capacity,
+selective reset) either failed to reduce supply enough or created larger
+imbalances at finer levels. A correct hierarchical max flow for this specific
+problem requires proper restriction and prolongation operators that preserve
+the |diff|≤1 invariant; this remains future work.
+
+### Practical recommendation
+
+For high face counts, use the `-subdiv N` workflow instead of solving directly
+at the target resolution. Running at 25k + 2 subdivisions produces ~400k faces
+in ~43 s vs hours for a direct 400k solve.
+
+---
+
 ## Windows build instructions
 
 See [`README.md`](README.md#windows-build-visual-studio--msvc) for the

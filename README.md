@@ -18,8 +18,18 @@ See [`CHANGES.md`](CHANGES.md) for a detailed breakdown of all fixes and enhance
 - **~13.5× speedup** from fixing the MSVC optimization level (`/O2` vs the silently-ignored `-O3`)
 - Full **OpenMP parallelism** across all major solver stages
 - **`-subdiv N`** flag: run at low resolution then subdivide and refit to the original surface — produces ~400k faces in ~43 s instead of hours
-- **Progress output** (`N% done`) throughout the entire pipeline
+- **Progress output** (`N% done`) throughout the entire pipeline with total elapsed time
 - **`TravelField` hang fix** for large/irregular meshes with `-adaptive`
+- **ConjugateGradient** replacing serial Cholesky in position solvers (warm-started, no O(n^1.5) factorization)
+- **Profiling instrumentation** (enabled with `-DBUILD_LOG=ON`) identifying Boykov-Kolmogorov max flow as the dominant bottleneck at high face counts (78% of index map time at 25k, 69% at 200k)
+
+### Recommended workflow for high-resolution output
+For face counts above ~50k, running directly is slow due to super-linear flow solver scaling.
+Use `-subdiv` instead:
+```sh
+# ~400k faces in ~43 s (vs hours running directly at 400k)
+quadriflow -i mesh.obj -o out.obj -f 25000 -subdiv 2
+```
 
 ## Desktop Software
 The software supports cmake build for Linux/Mac/Windows systems. For linux and mac users, run **`sh demo.sh`** to build and try the QuadriFlow example, which converts `examples/Gargoyle_input.obj` to `examples/Gargoyle_quadriflow.obj`.
