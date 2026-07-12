@@ -49,8 +49,15 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")  # enable assert
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g")  # enable assert
+if(MSVC)
+    # MSVC does not recognise -O3; use /O2 (maximize speed) + /Ob2 (any-suitable
+    # inlining) + /Oi (enable intrinsics) + /Ot (favour speed over size)
+    set(CMAKE_CXX_FLAGS_RELEASE "/O2 /Ob2 /Oi /Ot /DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "/O2 /Ob2 /Oi /Ot /DNDEBUG /Zi")
+else()
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3")  # enable assert
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g")  # enable assert
+endif()
 set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS}")
 set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG}")
 
