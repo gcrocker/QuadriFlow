@@ -8,6 +8,9 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
+#ifdef WITH_OMP
+#include <omp.h>
+#endif
 
 #include "config.hpp"
 #include "field-math.hpp"
@@ -170,65 +173,72 @@ void Optimizer::optimize_scale(Hierarchy& mRes, VectorXd& rho, int adaptive) {
             }
         }
 
-        std::vector<std::unordered_map<int, double>> entries(V.cols() * 2);
         double lambda = 1;
-        for (int i = 0; i < (int)entries.size(); ++i) {
-            entries[i][i] = lambda;
+        // Build triplets directly — setFromTriplets sums duplicates, so
+        // the face loop is embarrassingly parallel with thread-local storage.
+#ifdef WITH_OMP
+        int nthreads = omp_get_max_threads();
+#else
+        int nthreads = 1;
+#endif
+        std::vector<std::vector<Eigen::Triplet<double>>> tlocal(nthreads);
+        // Diagonal (lambda * I)
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
+        for (int i = 0; i < V.cols() * 2; ++i) {
+#ifdef WITH_OMP
+            tlocal[omp_get_thread_num()].push_back({i, i, lambda});
+#else
+            tlocal[0].push_back({i, i, lambda});
+#endif
         }
+        // Per-face off-diagonal entries
+#ifdef WITH_OMP
+#pragma omp parallel for schedule(static)
+#endif
         for (int i = 0; i < F.cols(); ++i) {
+#ifdef WITH_OMP
+            auto& lt = tlocal[omp_get_thread_num()];
+#else
+            auto& lt = tlocal[0];
+#endif
             for (int j = 0; j < 3; ++j) {
                 int v1 = F(j, i);
                 int v2 = F((j + 1) % 3, i);
                 Vector3d diff = V.col(v2) - V.col(v1);
                 Vector3d q_1 = Q.col(v1);
-                Vector3d q_2 = Q.col(v2);
                 Vector3d n_1 = N.col(v1);
                 Vector3d n_2 = N.col(v2);
                 Vector3d q_1_y = n_1.cross(q_1);
-                auto index = compat_orientation_extrinsic_index_4(q_1, n_1, q_2, n_2);
+                auto index = compat_orientation_extrinsic_index_4(q_1, n_1, Q.col(v2), n_2);
                 int v1_x = v1 * 2, v1_y = v1 * 2 + 1, v2_x = v2 * 2, v2_y = v2 * 2 + 1;
-
                 double dx = diff.dot(q_1);
                 double dy = diff.dot(q_1_y);
-
-                double kx_g = K(0, v1);
-                double ky_g = K(1, v1);
-
-                if (index.first % 2 != index.second % 2) {
-                    std::swap(v2_x, v2_y);
-                }
-                double scale_x = (fmin(fmax(1 + kx_g * dy, 0.3), 3));
-                double scale_y = (fmin(fmax(1 + ky_g * dx, 0.3), 3));
-                //                (v2_x - scale_x * v1_x)^2 = 0
-                // x^2 - 2s xy + s^2 y^2
-                entries[v2_x][v2_x] += 1;
-                entries[v1_x][v1_x] += scale_x * scale_x;
-                entries[v2_y][v2_y] += 1;
-                entries[v1_y][v1_y] += scale_y * scale_y;
-                auto it = entries[v1_x].find(v2_x);
-                if (it == entries[v1_x].end()) {
-                    entries[v1_x][v2_x] = -scale_x;
-                    entries[v2_x][v1_x] = -scale_x;
-                    entries[v1_y][v2_y] = -scale_y;
-                    entries[v2_y][v1_y] = -scale_y;
-                } else {
-                    it->second -= scale_x;
-                    entries[v2_x][v1_x] -= scale_x;
-                    entries[v1_y][v2_y] -= scale_y;
-                    entries[v2_y][v1_y] -= scale_y;
-                }
+                if (index.first % 2 != index.second % 2) std::swap(v2_x, v2_y);
+                double scale_x = fmin(fmax(1 + K(0, v1) * dy, 0.3), 3);
+                double scale_y = fmin(fmax(1 + K(1, v1) * dx, 0.3), 3);
+                lt.push_back({v2_x, v2_x, 1.0});
+                lt.push_back({v1_x, v1_x, scale_x * scale_x});
+                lt.push_back({v2_y, v2_y, 1.0});
+                lt.push_back({v1_y, v1_y, scale_y * scale_y});
+                lt.push_back({v1_x, v2_x, -scale_x});
+                lt.push_back({v2_x, v1_x, -scale_x});
+                lt.push_back({v1_y, v2_y, -scale_y});
+                lt.push_back({v2_y, v1_y, -scale_y});
             }
         }
+        // Merge thread-local triplets
+        for (int t = 0; t < nthreads; ++t)
+            lhsTriplets.insert(lhsTriplets.end(), tlocal[t].begin(), tlocal[t].end());
 
         Eigen::SparseMatrix<double> A(V.cols() * 2, V.cols() * 2);
         VectorXd rhs(V.cols() * 2);
-        rhs.setZero();
-        for (int i = 0; i < entries.size(); ++i) {
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
+        for (int i = 0; i < V.cols() * 2; ++i)
             rhs(i) = lambda * S(i % 2, i / 2);
-            for (auto& rec : entries[i]) {
-                lhsTriplets.push_back(Eigen::Triplet<double>(i, rec.first, rec.second));
-            }
-        }
         A.setFromTriplets(lhsTriplets.begin(), lhsTriplets.end());
         LinearSolver<Eigen::SparseMatrix<double>> solver;
         solver.analyzePattern(A);
