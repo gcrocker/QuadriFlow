@@ -7,6 +7,7 @@
 #include <memory>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "config.hpp"
 #include "field-math.hpp"
@@ -157,7 +158,10 @@ void Optimizer::optimize_scale(Hierarchy& mRes, VectorXd& rho, int adaptive) {
     if (adaptive) {
         std::vector<Eigen::Triplet<double>> lhsTriplets;
 
-        lhsTriplets.reserve(F.cols() * 6);
+        lhsTriplets.reserve(F.cols() * 24);
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
         for (int i = 0; i < V.cols(); ++i) {
             for (int j = 0; j < 2; ++j) {
                 S(j, i) = 1.0;
@@ -166,9 +170,9 @@ void Optimizer::optimize_scale(Hierarchy& mRes, VectorXd& rho, int adaptive) {
             }
         }
 
-        std::vector<std::map<int, double>> entries(V.cols() * 2);
+        std::vector<std::unordered_map<int, double>> entries(V.cols() * 2);
         double lambda = 1;
-        for (int i = 0; i < entries.size(); ++i) {
+        for (int i = 0; i < (int)entries.size(); ++i) {
             entries[i][i] = lambda;
         }
         for (int i = 0; i < F.cols(); ++i) {
@@ -251,10 +255,13 @@ void Optimizer::optimize_scale(Hierarchy& mRes, VectorXd& rho, int adaptive) {
         }
     }
 
-    for (int l = 0; l < mRes.mS.size() - 1; ++l) {
+    for (int l = 0; l < (int)mRes.mS.size() - 1; ++l) {
         const MatrixXd& S = mRes.mS[l];
         MatrixXd& S_next = mRes.mS[l + 1];
         auto& toUpper = mRes.mToUpper[l];
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
         for (int i = 0; i < toUpper.cols(); ++i) {
             Vector2i upper = toUpper.col(i);
             Vector2d q0 = S.col(upper[0]);
@@ -406,7 +413,10 @@ void Optimizer::optimize_positions_dynamic(
         }
     }
     auto FindNearest = [&]() {
-        for (int i = 0; i < O_compact.size(); ++i) {
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
+        for (int i = 0; i < (int)O_compact.size(); ++i) {
             if (Vind[i] == -1) {
                 double min_dis = 1e30;
                 int min_ind = -1;
@@ -703,7 +713,10 @@ void Optimizer::optimize_positions_dynamic(
         int t2 = GetCurrentTime64();
         printf("[LSQ] Linear solver uses %lf seconds.\n", (t2 - t1) * 1e-3);
 #endif
-        for (int i = 0; i < O_compact.size(); ++i) {
+#ifdef WITH_OMP
+#pragma omp parallel for
+#endif
+        for (int i = 0; i < (int)O_compact.size(); ++i) {
             // Vector3d q = Q.col(Vind[i]);
             Vector3d q = Q_compact[i];
             // Vector3d n = N.col(Vind[i]);
