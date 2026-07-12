@@ -27,6 +27,43 @@ cmake .. -DCMAKE_BUILD_TYPE=release
 make -j
 ```
 
+### Windows Build (Visual Studio / MSVC)
+
+Building on Windows requires [vcpkg](https://github.com/microsoft/vcpkg) for dependencies and
+CMake 3.5+. The `git://` protocol may be blocked by firewalls; use HTTPS instead.
+
+```powershell
+# 1. Clone with HTTPS and initialise submodules
+git clone --recursive https://github.com/hjwdzh/QuadriFlow.git
+cd QuadriFlow
+
+# 2. Install dependencies via vcpkg (adjust path as needed)
+C:\vcpkg\vcpkg.exe install eigen3:x64-windows boost-filesystem:x64-windows boost-system:x64-windows boost-program-options:x64-windows boost-graph:x64-windows
+
+# 3. Configure
+cmake -S . -B build `
+    "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL" `
+    -DBUILD_OPENMP=ON
+
+# 4. Build
+cmake --build build --config Release --parallel
+```
+
+The executable is placed at `build\Release\quadriflow.exe`. Add vcpkg's bin directory to
+your PATH so the required DLLs are found at runtime:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+    'PATH',
+    [Environment]::GetEnvironmentVariable('PATH','User') + ';C:\vcpkg\installed\x64-windows\bin',
+    'User'
+)
+```
+
+**Note:** The CMakeLists.txt minimum version has been bumped from 3.1 to 3.5 to maintain
+compatibility with modern CMake. The same patch is applied to the bundled lemon submodule.
+
 ### QuadriFlow Software
 
 We take a manifold triangle mesh `input.obj` and generate a manifold quad mesh `output.obj`. The face number increases linearly with the resolution controled by the user.
@@ -95,9 +132,31 @@ This override other solvers and should only be used for benchmark purpose.
 ## External Dependencies
 * Boost
 * Eigen
-* OpenMP (optional in CMake)
+* OpenMP (optional, enabled with `-DBUILD_OPENMP=ON`; works on Linux/Mac/Windows)
 * TBB (optional in CMake)
 * GUROBI (for benchmark purpose only)
+
+### Enabling OpenMP
+
+OpenMP parallelises the orientation and position field solvers and typically delivers a
+**4–7× speedup** on multi-core hardware.
+
+**Linux / Mac (GCC / Clang)**
+```sh
+cmake .. -DCMAKE_BUILD_TYPE=release -DBUILD_OPENMP=ON
+make -j
+```
+
+**Windows (MSVC)**
+```powershell
+cmake -S . -B build `
+    "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL" `
+    -DBUILD_OPENMP=ON
+cmake --build build --config Release --parallel
+```
+
+MSVC ships with its own OpenMP runtime so no additional package installation is needed.
 
 ## Licenses
 

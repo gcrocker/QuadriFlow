@@ -43,6 +43,7 @@ int main(int argc, char** argv) {
         }
     }
     printf("%d %s %s\n", faces, input_obj.c_str(), output_obj.c_str());
+    print_progress(0);
     if (input_obj.size() >= 1) {
         field.Load(input_obj.c_str());
     } else {
@@ -50,11 +51,13 @@ int main(int argc, char** argv) {
         // field.Load((std::string(DATA_PATH) + "/fertility.obj").c_str());
     }
 
+    print_progress(2);
     printf("Initialize...\n");
     t1 = GetCurrentTime64();
     field.Initialize(faces);
     t2 = GetCurrentTime64();
     printf("Use %lf seconds\n", (t2 - t1) * 1e-3);
+    print_progress(4);
 
     if (field.flag_preserve_boundary) {
         printf("Add boundary constrains...\n");
@@ -108,11 +111,13 @@ int main(int argc, char** argv) {
     field.ComputePositionSingularities();
     t2 = GetCurrentTime64();
     printf("Use %lf seconds\n", (t2 - t1) * 1e-3);
+    print_progress(91);
     t1 = GetCurrentTime64();
     printf("Solve index map...\n");
     field.ComputeIndexMap();
     t2 = GetCurrentTime64();
     printf("Indexmap Use %lf seconds\n", (t2 - t1) * 1e-3);
+    print_progress(99);
     printf("Writing the file...\n");
 
     if (output_obj.size() < 1) {
@@ -121,6 +126,7 @@ int main(int argc, char** argv) {
     } else {
         field.OutputMesh(output_obj.c_str());
     }
+    print_progress(100);
     printf("finish...\n");
     //	field.LoopFace(2);
     return 0;

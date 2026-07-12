@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
+cmake_policy(SET CMP0091 NEW)
 project(QuadriFlow LANGUAGES CXX)
 
 option(BUILD_PERFORMANCE_TEST "More subdivisition for performance test" OFF)
@@ -84,7 +85,13 @@ if (BUILD_PERFORMANCE_TEST)
 endif(BUILD_PERFORMANCE_TEST)
 
 if (BUILD_OPENMP)
+    find_package(OpenMP REQUIRED)
     add_definitions(-DWITH_OMP)
+    if(MSVC)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp")
+    else()
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    endif()
 endif(BUILD_OPENMP)
 
 if (BUILD_LOG)
