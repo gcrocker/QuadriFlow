@@ -43,6 +43,7 @@ int main(int argc, char** argv) {
         }
     }
     printf("%d %s %s\n", faces, input_obj.c_str(), output_obj.c_str());
+    unsigned long long t_start = GetCurrentTime64();
     print_progress(0);
     if (input_obj.size() >= 1) {
         field.Load(input_obj.c_str());
@@ -127,6 +128,7 @@ int main(int argc, char** argv) {
         field.OutputMesh(output_obj.c_str());
     }
     print_progress(100);
+    printf("Total time: %.1f seconds\n", (GetCurrentTime64() - t_start) * 1e-3);
     printf("finish...\n");
     //	field.LoopFace(2);
     return 0;
