@@ -1,6 +1,7 @@
 #include "optimizer.hpp"
 
 #include <Eigen/Sparse>
+#include <Eigen/IterativeLinearSolvers>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -702,24 +703,22 @@ void Optimizer::optimize_positions_dynamic(
         int t1 = GetCurrentTime64();
 #endif
 
-        // FIXME: IncompleteCholesky Preconditioner will fail here so I fallback to Diagonal one.
-        // I suspected either there is a implementation bug in IncompleteCholesky Preconditioner
-        // or there is a memory corruption somewhere.  However, g++'s address sanitizer does not
-        // report anything useful.
-        LinearSolver<Eigen::SparseMatrix<double>> solver;
-        solver.analyzePattern(A);
-        solver.factorize(A);
-        //        Eigen::setNbThreads(1);
-        //        ConjugateGradient<SparseMatrix<double>, Lower | Upper> solver;
-        //        VectorXd x0 = VectorXd::Map(x.data(), x.size());
-        //        solver.setMaxIterations(40);
-
-        //        solver.compute(A);
-        VectorXd x_new = solver.solve(rhs);  // solver.solveWithGuess(rhs, x0);
+        // Use ConjugateGradient with diagonal preconditioner (the default).
+        // DiagonalPreconditioner is safe; IncompleteCholesky was tried by the
+        // original authors but crashed — see the FIXME in git history.
+        // Warm-start from the current positions to reduce iteration count.
+        Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
+                                  Eigen::Lower|Eigen::Upper> solver;
+        solver.setMaxIterations(300);
+        solver.setTolerance(1e-4);
+        solver.compute(A);
+        VectorXd x0 = VectorXd::Map(x.data(), x.size());
+        VectorXd x_new = solver.solveWithGuess(rhs, x0);
 
 #ifdef LOG_OUTPUT
-        // std::cout << "[LSQ] n_iteration:" << solver.iterations() << std::endl;
-        // std::cout << "[LSQ] estimated error:" << solver.error() << std::endl;
+        printf("[CG dyn iter %d/%d] n=%d  cg_iters=%d  err=%g\n",
+               iter + 1, max_iter, (int)O_compact.size(),
+               (int)solver.iterations(), solver.error());
         int t2 = GetCurrentTime64();
         printf("[LSQ] Linear solver uses %lf seconds.\n", (t2 - t1) * 1e-3);
 #endif
@@ -1198,19 +1197,13 @@ void Optimizer::optimize_positions_fixed(
 #ifdef LOG_OUTPUT
     int t1 = GetCurrentTime64();
 #endif
-    /*
-        Eigen::setNbThreads(1);
-        ConjugateGradient<SparseMatrix<double>, Lower | Upper> solver;
-        VectorXd x0 = VectorXd::Map(x.data(), x.size());
-        solver.setMaxIterations(40);
-
-        solver.compute(A);
-     */
-    LinearSolver<Eigen::SparseMatrix<double>> solver;
-    solver.analyzePattern(A);
-    solver.factorize(A);
-
-    VectorXd x_new = solver.solve(rhs);
+    Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
+                              Eigen::Lower|Eigen::Upper> solver;
+    solver.setMaxIterations(300);
+    solver.setTolerance(1e-5);
+    VectorXd x0 = VectorXd::Map(x.data(), x.size());
+    solver.compute(A);
+    VectorXd x_new = solver.solveWithGuess(rhs, x0);
 #ifdef LOG_OUTPUT
     // std::cout << "[LSQ] n_iteration:" << solver.iterations() << std::endl;
     // std::cout << "[LSQ] estimated error:" << solver.error() << std::endl;
