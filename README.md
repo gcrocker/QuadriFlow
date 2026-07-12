@@ -13,6 +13,14 @@ Our 3D WebGL Apps for QuadriFlow are online!  Without any installation, you are 
 *  [**Quadrangulate**](https://yichaozhou.com/publication/1805quadriflow/#tool) your own meshes and
     download the result!
 
+## Windows Performance & Improvements
+See [`CHANGES.md`](CHANGES.md) for a detailed breakdown of all fixes and enhancements made for Windows/MSVC builds, including:
+- **~13.5× speedup** from fixing the MSVC optimization level (`/O2` vs the silently-ignored `-O3`)
+- Full **OpenMP parallelism** across all major solver stages
+- **`-subdiv N`** flag: run at low resolution then subdivide and refit to the original surface — produces ~400k faces in ~43 s instead of hours
+- **Progress output** (`N% done`) throughout the entire pipeline
+- **`TravelField` hang fix** for large/irregular meshes with `-adaptive`
+
 ## Desktop Software
 The software supports cmake build for Linux/Mac/Windows systems. For linux and mac users, run **`sh demo.sh`** to build and try the QuadriFlow example, which converts `examples/Gargoyle_input.obj` to `examples/Gargoyle_quadriflow.obj`.
 
